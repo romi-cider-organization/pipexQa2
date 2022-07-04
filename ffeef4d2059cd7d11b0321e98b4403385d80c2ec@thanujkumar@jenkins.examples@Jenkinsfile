@@ -1,0 +1,29 @@
+node('master') {
+
+ try {
+    stage("echo") {
+        sh 'echo "Hello World!"'
+        def obj = null
+        sh "${obj.class}"
+    }
+  }catch (Exception e) {
+      error 'broken pipeline '+e
+      currentBuild.result='FAILURE'
+  } finally {
+      stage('send notification email') {
+          mail bcc: '',  cc: '', from: 'jenkins.home.amd@gmail.com', replyTo: '', subject: "Jenkins build failed: ${env.JOB_NAME} #${env.BUILD_NUMBER}", to: 'jenkins.home.amd@gmail.com',   body: """<p>EXCEPTION: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p><p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>"""
+          //Two emails above and below
+          notifyException()
+      }
+  }
+}
+
+def notifyException() {
+     emailext (
+      subject: "EXCEPTION: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+      body: """<p>EXCEPTION: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+        <p>Check console output at &QUOT;<a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a>&QUOT;</p>""",
+      to: 'jenkins.home.amd@gmail.com'
+    )
+
+}

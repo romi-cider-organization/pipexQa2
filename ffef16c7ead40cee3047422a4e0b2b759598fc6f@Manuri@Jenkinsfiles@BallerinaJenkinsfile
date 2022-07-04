@@ -1,0 +1,99 @@
+#!groovy
+node {
+    try {
+        env.PATH = "${tool 'apache-maven-3.2.2'}/bin:${env.PATH}"
+        env.JAVA_HOME="${tool 'Oracle-JDK-1.8.0_45'}"
+        env.PATH="${env.JAVA_HOME}/bin:${env.PATH}"
+
+        String settingsXMLID = "adb07180-fa9c-4bea-94c4-130813b8018c-manuri";
+        String gitCredentialsID = "manuri-pipeline-git";
+        String user = "manuri";
+
+
+        stage('Build Common Dependency') {
+            cloneRepository("ballerina-temp", user, gitCredentialsID);
+
+            release(settingsXMLID, "ballerina-temp");
+        }
+
+        stage('Build Dependent Repositories') {
+            parallel repo1: {
+                cloneRepository("docerina-temp", user, gitCredentialsID);
+
+                updateProperties("docerina-temp", gitCredentialsID, settingsXMLID, user, "Updating properties",
+                        "org.ballerinalang:ballerina-core,org.ballerinalang:ballerina-launcher");
+
+                release(settingsXMLID, "docerina-temp")
+            }, repo2: {
+                cloneRepository("testerina-temp", user, gitCredentialsID);
+
+                updateProperties("testerina-temp", gitCredentialsID, settingsXMLID, user, "Updating properties",
+                        "org.ballerinalang:ballerina-core,org.ballerinalang:ballerina-launcher," +
+                        "org.ballerinalang:ballerina-native,org.ballerinalang:annotation-processor");
+
+                release(settingsXMLID, "testerina-temp")
+            }, repo3: {
+                cloneRepository("connectors-temp", user, gitCredentialsID);
+
+                updateProperties("connectors-temp", gitCredentialsID, settingsXMLID, user, "Updating properties",
+                        "org.ballerinalang:ballerina-core,org.ballerinalang:ballerina-native,org.ballerinalang:annotation-processor");
+
+                release(settingsXMLID, "connectors-temp")
+            }, failFast: true
+        }
+    } finally {
+        stage('Clean Up') {
+            deleteDir();
+        }
+    }
+}
+
+def cloneRepository(String repositoryName, String user, String credentials) {
+    checkout([
+            $class: 'GitSCM',
+            branches: [[name: '*/master']],
+            doGenerateSubmoduleConfigurations: false,
+            extensions: [[$class: 'LocalBranch', localBranch: 'master'],
+                         [$class: 'RelativeTargetDirectory', relativeTargetDir: repositoryName]],
+            submoduleCfg: [],
+            userRemoteConfigs:
+                    [[credentialsId: credentials,
+                      url: "http://github.com/${user}/${repositoryName}.git"]]])
+}
+
+def updateProperties(String repositoryName, String credentials, String settingsXml, String user, String commitMessage, String propertiesList) {
+    configFileProvider(
+            [configFile(fileId: settingsXml, variable: 'MAVEN_SETTINGS')]) {
+        dir(repositoryName) {
+            sh "mvn -s $MAVEN_SETTINGS versions:update-properties -Dincludes=${propertiesList}"
+            boolean changesPresent = sh (
+                    script: "git diff-index --quiet HEAD",
+                    returnStatus: true
+            ) == 1
+            if (changesPresent) {
+                sh("git add -u")
+                sh("git commit -m '${commitMessage}'")
+                withCredentials(
+                        [[$class          : 'UsernamePasswordMultiBinding',
+                          credentialsId   : credentials,
+                          usernameVariable: 'GIT_USERNAME',
+                          passwordVariable: 'GIT_PASSWORD']]) {
+                    sh("git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/${user}/${repositoryName}.git")
+                    sh("git push origin HEAD:master")
+                }
+            }
+        }
+    }
+}
+
+def release(String settingsXml, String repositoryDir) {
+    configFileProvider(
+            [configFile(fileId: settingsXml, variable: 'MAVEN_SETTINGS')]) {
+        dir(repositoryDir) { sh 'mvn -s $MAVEN_SETTINGS release:prepare release:perform -B -Darguments="-Dmaven.deploy.skip=true -DskipTests=true"' }
+    }
+}
+
+
+
+
+
